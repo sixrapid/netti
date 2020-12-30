@@ -1,4 +1,4 @@
-use std::str::FromStr;
+use std::{collections::HashMap};
 
 use nom::{
     IResult, 
@@ -7,8 +7,6 @@ use nom::{
     character::complete::char,
     sequence::{delimited, separated_pair}
 };
-
-use crate::netctl;
 
 // gets the key from the input if it matches a legal alternative
 fn parse_key(input: &str) -> IResult<&str, &str> {
@@ -72,24 +70,16 @@ fn parse_line(input: &str) -> Result<(&str, String), nom::Err<nom::error::Error<
     Ok((k, v))
 }
 
-// parses a single netctl profile file from a &str. &str is expected to
-// contain the profile file in lines.
-pub fn parse_netctl_profile(config: &str) -> Option<netctl::Profile> {
-    let mut profile = netctl::Profile::new();
+
+// get all key-value pairs in the config file and return in a hashmap
+pub fn parse_profile_to_hashmap(config: &str) -> HashMap<&str, String> {
+    let mut map = HashMap::new();
 
     for line in config.lines() {
-        match parse_line(line) {
-            Ok(("Connection", v)) => profile.connection = netctl::Connection::from_str(&*v).unwrap(),
-            Ok(("Interface", v)) => profile.interface = v,
-            Ok(("ESSID", v)) => profile.essid = v,
-            Ok(("Description", v)) => profile.description = v,
-            Ok(("Security", v)) => {
-                if v == "wpa-configsection" {return None} else {continue};
-            },
-            Ok(_) => continue, // line contained an unrecognized key or value
-            Err(_) => continue, // line contained no key
+        if let Ok((k, v)) = parse_line(line) {
+            map.insert(k, v);
         }
     }
 
-    Some(profile)
+    map
 }  

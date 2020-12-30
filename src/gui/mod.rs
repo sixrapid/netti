@@ -1,235 +1,285 @@
+#![allow(clippy::clippy::redundant_field_names)]
+
+use std::{io, path::PathBuf};
+
+use relm::{Component, Widget, init};
+use gtk::Orientation::Vertical;
 use gtk::prelude::*;
-use std::{sync::Arc};
+use relm_derive::{Msg, widget};
 
 use crate::netctl;
 
-pub struct App {
-    pub window: gtk::ApplicationWindow,
-    pub header: Header,
-    pub content: Content,
+// Columns for the TreeView
+struct Column {
+    pub type_: glib::Type,
+    pub title: &'static str,
+    pub renderer: Renderer,
 }
 
-pub struct Header {
-    pub headerbar: gtk::HeaderBar,
-    pub add_button: gtk::Button,
+pub enum Renderer {
+    Text,
+    Pixbuf,
 }
 
-pub struct Content {
-    pub root_container: gtk::Box,
-    pub profile_list: ProfileList,
-    pub bottombar: BottomBar,
+const NCOLS: usize = 4;
+const COLUMNS: [Column; NCOLS] = [
+    Column {type_: glib::Type::String, title: "", renderer: Renderer::Pixbuf},
+    Column {type_: glib::Type::String, title: "Interface", renderer: Renderer::Text},
+    Column {type_: glib::Type::String, title: "ESSID", renderer: Renderer::Text},
+    Column {type_: glib::Type::String, title: "Status", renderer: Renderer::Pixbuf},
+];
+
+const COLUMN_TYPES: [glib::Type; NCOLS] = {
+    let mut array = [glib::Type::String; NCOLS];
+
+    let mut i = 0;
+    while i < NCOLS {
+        array[i] = COLUMNS[i].type_;
+        i += 1;
+    }
+
+    array
+};
+
+const COLUMN_INDICES: [u32; NCOLS] = {
+    let mut array = [0 as u32; NCOLS];
+
+    let mut i = 0;
+    
+    while i < NCOLS {
+        array[i] = i as u32;
+        i += 1;
+    }
+
+    array
+};
+
+
+
+////////
+// HEADERBAR
+////////
+#[derive(Msg)]
+pub enum HeaderMsg {
+    Add,
 }
 
-pub struct ProfileList {
-    pub container: gtk::ScrolledWindow,
-    pub list: gtk::TreeView,
-    pub model: Arc<gtk::ListStore>,
+pub struct HeaderModel {
+    primary_menu: Component<PrimaryMenu>,
 }
 
-pub struct BottomBar {
-    pub actionbar: gtk::ActionBar,
-    pub switch_button: gtk::Button,
-    pub enable_button: gtk::Button,
-    pub disable_button: gtk::Button,
-    pub edit_button: gtk::Button,
-    pub delete_button: gtk::Button,
-}
+// Headerbar
+#[widget]
+impl Widget for Header {
+    fn model() -> HeaderModel {
+        let primary_menu = init::<PrimaryMenu>(()).expect("PrimaryMenu");
+        HeaderModel { primary_menu }
+    }
 
-#[derive(Debug)]
-#[repr(i32)]
-enum Columns {
-    Connection = 0,
-    Interface,
-    ESSID,
-    Status,
-}
+    fn update(&mut self, event: HeaderMsg) {
+        match event {
+            HeaderMsg::Add => println!("add"),
+        }
+    }
 
-impl App {
-    fn new(application: &gtk::Application) -> App {
-        // create
-        let window = gtk::ApplicationWindow::new(application);
-        let header = Header::new();
-        let content = Content::new();
+    // do stuff with gtk-rs that relm can not do
+    fn init_view(&mut self) {
+        self.add_button.get_style_context().add_class("suggested-action");
+        gtk::MenuButtonExt::set_direction(&self.primary_menu_button, gtk::ArrowType::None);
+    }
 
-        // configure window
-        window.set_title("Netti");
-        window.set_position(gtk::WindowPosition::Center);
-        window.set_default_size(100, 500);
-        window.set_wmclass("netti", "Netti");
-        gtk::Window::set_default_icon_name("preferences-system-network");
+    view! {
+        gtk::HeaderBar {
+            title: Some("Netti"),
+            show_close_button: true,
+            has_subtitle: false,
 
-        // set headerbar
-        window.set_titlebar(Some(&header.headerbar));
+            #[name="add_button"]
+            gtk::Button {
+                clicked => HeaderMsg::Add,
+                label: "Add profile",
+            },
+            #[name="primary_menu_button"]
+            gtk::MenuButton {
+                use_popover: true,
+                popover: Some(self.model.primary_menu.widget()),
+                child: {
+                    pack_type: gtk::PackType::End,
+                },
 
-        // add the root container to the window
-        window.add(&content.root_container);
-
-        // return main application state
-        App { window, header , content }
+            }
+        }
     }
 }
 
-impl Header {
-    fn new() -> Header {
-        // Creates the main header bar container widget.
-        let headerbar = gtk::HeaderBar::new();
-        headerbar.set_title(Some("Netti"));
-        headerbar.set_has_subtitle(false);
-        headerbar.set_show_close_button(true);
+#[derive(Msg)]
+pub enum PrimaryMenuMsg {
+    About,
+}
 
-        let add_button = gtk::Button::with_label("New profile");
-        add_button.get_style_context().add_class("suggested-action");
+// Primary menu popover
+#[widget]
+impl Widget for PrimaryMenu {
+    fn model() {}
+    fn update(&mut self, event: PrimaryMenuMsg) {
+        match event {
+            PrimaryMenuMsg::About => println!("about"),
+        }
+    }
 
-        headerbar.pack_start(&add_button);
-
-        // Returns the header and all of it's state
-        Header { headerbar, add_button }
+    view! {
+        gtk::Popover {
+            gtk::Box {
+                spacing: 1,
+                orientation: Vertical,
+                border_width: 5,
+                gtk::Button {
+                    label: "works!",
+                    clicked => PrimaryMenuMsg::About,
+                },
+            },
+        },
     }
 }
 
-impl Content {
-    fn new() -> Content {
-        // root container
-        let root_container = gtk::Box::new(gtk::Orientation::Vertical, 0);
+//////
+// MAIN WINDOW
+//////
 
-        // its contents
-        let profile_list = ProfileList::new();
-        let bottombar = BottomBar::new();
-
-        root_container.pack_start(&profile_list.container, true, true, 2);
-        root_container.pack_start(&bottombar.actionbar, false, true, 0);
-
-        Content { root_container, profile_list, bottombar }
-    }
+#[derive(Msg)]
+pub enum WinMsg {
+    Quit,
 }
 
-impl ProfileList {
-    fn new() -> ProfileList {
-        // scrollbars and nice border/shadow
-        let container = gtk::ScrolledWindow::new(None::<&gtk::Adjustment>, None::<&gtk::Adjustment>);
-        container.set_shadow_type(gtk::ShadowType::EtchedIn);
-        container.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
+pub struct WinModel {
+    header: Component<Header>,
+    list_store: gtk::ListStore,
+}
 
-        // list (treeview) from the model
-        let model = Arc::new(create_model().unwrap()); // MAY PANIC
-        let list = gtk::TreeView::with_model(&*model);
-        list.set_vexpand(true);
+#[widget]
+impl Widget for Win {
+    fn model() -> WinModel {
+        // append custom icons to default icon theme
+        let icon_theme = gtk::IconTheme::get_default().unwrap_or_default();
+        icon_theme.append_search_path(PathBuf::from("./resources/icons/"));
+        gtk::IconTheme::load_icon(&icon_theme, "network-ppp-symbolic", 16, gtk::IconLookupFlags::empty()).unwrap();
+
+
+        let header = init::<Header>(()).expect("Header");
+        let res = create_and_fill_list_store();
+
+        match res {
+            Ok(list_store) => WinModel { header, list_store },
+            Err(e) => panic!("vittu: {}", e),
+        }
+    }
+
+    fn update(&mut self, event:WinMsg) {
+        match event {
+            WinMsg::Quit => gtk::main_quit(),
+        }
+    }
+
+    fn init_view(&mut self) {
+        // cosmetic options for "Delete"-button
+        self.delete_button.get_style_context().add_class("destructive-action");
         
-        container.add(&list);
+        // create the columns for the treeview
+        create_columns(&self.tree_view);
 
-        // stuff that i dont really understand
-        ProfileList::create_columns(&model, &list);
-
-
-        ProfileList { container, list, model }
     }
+    
+    view! {
+        #[name="window"]
+        gtk::Window {
+            title: "Title",
+            property_default_width: 100,
+            property_default_height: 500,
+            titlebar: Some(self.model.header.widget()),
 
-    fn create_columns(model: &Arc<gtk::ListStore>, list: &gtk::TreeView) {
-        // connection type (wireless / wired)
-        {
-            let renderer = gtk::CellRendererPixbuf::new();
-            let column = gtk::TreeViewColumn::new();
-            column.pack_start(&renderer, true);
-            column.add_attribute(&renderer, "icon-name", Columns::Connection as i32);
-            column.set_sort_column_id(Columns::Connection as i32);
-            list.append_column(&column);
+            #[name="app"]
+            gtk::Box {
+                orientation: Vertical,
+                gtk::ScrolledWindow {
+                    shadow_type: gtk::ShadowType::EtchedIn,
+                    property_vscrollbar_policy: gtk::PolicyType::Automatic,
+                    property_hscrollbar_policy: gtk::PolicyType::Never,
+                    #[name="tree_view"]
+                    gtk::TreeView {
+                        vexpand: true,
+                        model: Some(&self.model.list_store),
+                    }
+                },
+                #[name="actionbar"]
+                gtk::ActionBar {
+                    #[name="switch_button"]
+                    gtk::Button {
+                        label: "Switch to",
+                    },
+                    #[name="enable_button"]
+                    gtk::Button {
+                        label: "Enable",
+                    },
+                    #[name="disable_button"]
+                    gtk::Button {
+                        label: "Disable",
+                    },
+                    #[name="delete_button"]
+                    gtk::Button {
+                        label: "Delete",
+                        child: {
+                            pack_type: gtk::PackType::End,
+                        }
+                    },
+                },
+            },
+            delete_event(_,_) => (WinMsg::Quit, Inhibit(false)),
         }
-
-        // Interface (wlp2s0, eth0, ...)
-        {
-            let renderer = gtk::CellRendererText::new();
-            let column = gtk::TreeViewColumn::new();
-            column.pack_start(&renderer, true);
-            column.set_title("Interface");
-            column.add_attribute(&renderer, "text", Columns::Interface as i32);
-            column.set_sort_column_id(Columns::Interface as i32);
-            list.append_column(&column);
-        }
-
-
-        // ESSID
-        {
-            let renderer = gtk::CellRendererText::new();
-            let column = gtk::TreeViewColumn::new();
-            column.pack_start(&renderer, true);
-            column.set_title("ESSID");
-            column.add_attribute(&renderer, "text", Columns::ESSID as i32);
-            column.set_sort_column_id(Columns::ESSID as i32);
-            list.append_column(&column);
-        }
-
-        // status (active / enabled / disabled )
-        {
-            let renderer = gtk::CellRendererPixbuf::new();
-            let column = gtk::TreeViewColumn::new();
-            column.pack_start(&renderer, true);
-            column.set_title("Status");
-            column.add_attribute(&renderer, "icon-name", Columns::Status as i32);
-            column.set_sort_column_id(Columns::Status as i32);
-            list.append_column(&column);
-        }
-
     }
 }
 
-impl BottomBar {
-    fn new() -> BottomBar {
-        // bar
-        let actionbar = gtk::ActionBar::new();
+
+fn create_and_fill_list_store() -> Result<gtk::ListStore, io::Error> {
+    let list_store = gtk::ListStore::new(&COLUMN_TYPES);
+
+    for profile in netctl::profile_iter()? {
+        list_store.set(&list_store.append(), &COLUMN_INDICES, &[
+            &profile.connection.icon_name(),
+            &profile.interface,
+            &profile.essid,
+            &"on", // fix this
+        ]);
+    }
+
+    Ok(list_store)
+}
+
+// creates columns for the TreeView
+fn create_columns(tree_view: &gtk::TreeView) {
+    
+    for (i, col) in COLUMNS.iter().enumerate() {
         
-        // buttons
-        let switch_button = gtk::Button::with_label("Switch to");
-        let enable_button = gtk::Button::with_label("Enable");
-        let disable_button = gtk::Button::with_label("Disable");
-        let edit_button = gtk::Button::with_label("Edit");
-        let delete_button = gtk::Button::with_label("Delete");
-        delete_button.get_style_context().add_class("destructive-action");
+        let tree_view_col = gtk::TreeViewColumn::new();
+        tree_view_col.set_title(col.title);
 
-        actionbar.pack_start(&switch_button);
-        actionbar.pack_start(&enable_button);
-        actionbar.pack_start(&disable_button);
-        actionbar.pack_start(&edit_button);
-        actionbar.pack_end(&delete_button);
+        match col.renderer {
+            Renderer::Text => {
+                let renderer = gtk::CellRendererText::new();
+                tree_view_col.pack_start(&renderer, true);
+                tree_view_col.add_attribute(&renderer, "text", i as i32);
+            },
+            Renderer::Pixbuf => {
+                let renderer = gtk::CellRendererPixbuf::new();
+                tree_view_col.pack_start(&renderer, true);
+                tree_view_col.add_attribute(&renderer, "icon-name", i as i32);
+            },
+        };
 
-        BottomBar { 
-            actionbar,
-            switch_button,
-            enable_button,
-            disable_button,
-            edit_button,
-            delete_button,
-        }
+        tree_view.append_column(&tree_view_col);
+
     }
 }
 
-fn create_model() -> Result<gtk::ListStore, std::io::Error> {
-    let col_types: [glib::Type; 4] = [
-        glib::Type::String,
-        glib::Type::String,
-        glib::Type::String,
-        glib::Type::String,
-    ];
-
-    let col_indices = [0,1,2,3];
-
-    let profiles = netctl::get_profiles()?;
-
-    let store = gtk::ListStore::new(&col_types);
-
-    for p in profiles {
-        let values:[&dyn ToValue; 4] = [
-            if p.connection == netctl::Connection::Wired {&"network-wired"} else {&"network-wireless"},
-            &p.interface,
-            &p.essid,
-            &"zoom-in",
-        ];
-        store.set(&store.append(), &col_indices, &values);
-    }
-
-    Ok(store)
-}
-
-pub fn build_ui(application: &gtk::Application) {
-    let app = App::new(application);
-    app.window.show_all();
+pub fn run() {
+    Win::run(()).unwrap();
 }
